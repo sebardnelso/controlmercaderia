@@ -211,53 +211,76 @@ app.post('/actualizar-cantrec', (req, res) => {
     return res.status(400).json({ error: 'Datos incompletos o incorrectos.' });
   }
 
-  const getCanPedQuery = 'SELECT canped FROM aus_pepend WHERE codbar = ?';
+  const getCanPedQuery = 'SELECT * FROM aus_pepend WHERE codbar = ?';
 
   db.query(getCanPedQuery, [codbar], (err, results) => {
     if (err) {
-      console.error('Error obteniendo canped:', err);
-      return res.status(500).json({ error: 'Error en el servidor al obtener canped.' });
+      console.error('Error obteniendo línea:', err);
+      return res.status(500).json({ error: 'Error en el servidor.' });
     }
 
     if (results.length === 0) {
       return res.status(404).json({ error: 'Línea no encontrada.' });
     }
 
-    const canped = results[0].canped;
+    const { canped, numero, codigo, codpro } = results[0];
     const pen = (cantrec !== canped) ? 1 : 0;
     const ter = (cantrec === canped) ? 1 : 0;
 
-    const updateQuery = `
+    const updateMainQuery = `
       UPDATE aus_pepend 
       SET cantrec = ?, ter = ?, pen = ?
       WHERE codbar = ?
     `;
 
-    db.query(updateQuery, [cantrec, ter, pen, codbar], (updateErr, updateResults) => {
+    db.query(updateMainQuery, [cantrec, ter, pen, codbar], (updateErr, updateResults) => {
       if (updateErr) {
-        console.error('Error actualizando cantrec:', updateErr);
-        return res.status(500).json({ error: 'Error al actualizar cantrec.' });
+        console.error('Error actualizando aus_pepend:', updateErr);
+        return res.status(500).json({ error: 'Error al actualizar aus_pepend.' });
       }
 
-      if (updateResults.affectedRows === 0) {
-        return res.status(404).json({ error: 'Línea no encontrada durante la actualización.' });
-      }
+      // Verificar si ya existe en aus_pepend2
+      const checkQuery = 'SELECT * FROM aus_pepend2 WHERE codbar = ? AND codigo = ?';
 
-      // Insertar en aus_pepend2 incluyendo 'pen'
-      const insertQuery = `
-        INSERT INTO aus_pepend2 (numero, codigo, codbar, canped, codpro, cantrec, ter, pen)
-        SELECT numero, codigo, codbar, canped, codpro, ?, ?, ?
-        FROM aus_pepend
-        WHERE codbar = ?
-      `;
-
-      db.query(insertQuery, [cantrec, ter, pen, codbar], (insertErr) => {
-        if (insertErr) {
-          console.error('Error insertando en aus_pepend2:', insertErr);
-          return res.status(500).json({ error: 'Error duplicando línea en aus_pepend2.' });
+      db.query(checkQuery, [codbar, codigo], (checkErr, checkResults) => {
+        if (checkErr) {
+          console.error('Error verificando existencia en aus_pepend2:', checkErr);
+          return res.status(500).json({ error: 'Error en la verificación previa.' });
         }
 
-        res.status(200).json({ message: 'Cantrec actualizado y duplicado en aus_pepend2.' });
+        if (checkResults.length > 0) {
+          // Ya existe → UPDATE
+          const updateBackup = `
+            UPDATE aus_pepend2
+            SET cantrec = ?, ter = ?, pen = ?
+            WHERE codbar = ? AND codigo = ?
+          `;
+
+          db.query(updateBackup, [cantrec, ter, pen, codbar, codigo], (upErr) => {
+            if (upErr) {
+              console.error('Error actualizando aus_pepend2:', upErr);
+              return res.status(500).json({ error: 'Error al actualizar en aus_pepend2.' });
+            }
+
+            return res.status(200).json({ message: 'Actualizado en ambas tablas.' });
+          });
+
+        } else {
+          // No existe → INSERT
+          const insertBackup = `
+            INSERT INTO aus_pepend2 (numero, codigo, codbar, canped, codpro, cantrec, ter, pen)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `;
+
+          db.query(insertBackup, [numero, codigo, codbar, canped, codpro, cantrec, ter, pen], (insErr) => {
+            if (insErr) {
+              console.error('Error insertando en aus_pepend2:', insErr);
+              return res.status(500).json({ error: 'Error al insertar en aus_pepend2.' });
+            }
+
+            return res.status(200).json({ message: 'Actualizado en aus_pepend y registrado en aus_pepend2.' });
+          });
+        }
       });
     });
   });
