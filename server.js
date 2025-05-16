@@ -211,9 +211,8 @@ app.post('/actualizar-cantrec', (req, res) => {
     return res.status(400).json({ error: 'Datos incompletos o incorrectos.' });
   }
 
-  // Primero, obtener 'canped' para el 'codbar' proporcionado
   const getCanPedQuery = 'SELECT canped FROM aus_pepend WHERE codbar = ?';
-  
+
   db.query(getCanPedQuery, [codbar], (err, results) => {
     if (err) {
       console.error('Error obteniendo canped:', err);
@@ -226,12 +225,12 @@ app.post('/actualizar-cantrec', (req, res) => {
 
     const canped = results[0].canped;
     const pen = (cantrec !== canped) ? 1 : 0;
-    const ter = 1; // Siempre establecemos ter = 1 al actualizar cantrec
+    const ter = (cantrec === canped) ? 1 : 0;
 
     const updateQuery = `
       UPDATE aus_pepend 
       SET cantrec = ?, ter = ?, pen = ?
-      WHERE codbar = ?;
+      WHERE codbar = ?
     `;
 
     db.query(updateQuery, [cantrec, ter, pen, codbar], (updateErr, updateResults) => {
@@ -244,10 +243,53 @@ app.post('/actualizar-cantrec', (req, res) => {
         return res.status(404).json({ error: 'Línea no encontrada durante la actualización.' });
       }
 
-      res.status(200).json({ message: 'Cantrec y estado actualizados correctamente.' });
+      // Insertar en aus_pepend2 incluyendo 'pen'
+      const insertQuery = `
+        INSERT INTO aus_pepend2 (numero, codigo, codbar, canped, codpro, cantrec, ter, pen)
+        SELECT numero, codigo, codbar, canped, codpro, ?, ?, ?
+        FROM aus_pepend
+        WHERE codbar = ?
+      `;
+
+      db.query(insertQuery, [cantrec, ter, pen, codbar], (insertErr) => {
+        if (insertErr) {
+          console.error('Error insertando en aus_pepend2:', insertErr);
+          return res.status(500).json({ error: 'Error duplicando línea en aus_pepend2.' });
+        }
+
+        res.status(200).json({ message: 'Cantrec actualizado y duplicado en aus_pepend2.' });
+      });
     });
   });
 });
+
+
+app.post('/recuperar-cantidades', (req, res) => {
+  const { numero } = req.body;
+
+  if (!numero) {
+    return res.status(400).json({ error: 'Número no proporcionado.' });
+  }
+
+  const query = `
+    SELECT codbar, cantrec
+    FROM aus_pepend2
+    WHERE numero = ? AND ter = 0
+  `;
+
+  db.query(query, [numero], (err, results) => {
+    if (err) {
+      console.error('Error recuperando cantidades:', err);
+      return res.status(500).json({ error: 'Error en el servidor al recuperar cantidades.' });
+    }
+
+    res.status(200).json(results);
+  });
+});
+
+
+
+
 // Ruta para obtener líneas pendientes
 app.get('/pendientes', (req, res) => {
   const query = `
