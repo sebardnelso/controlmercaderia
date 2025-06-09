@@ -422,62 +422,80 @@ app.get('/buscar-codbar/:codbar', (req, res) => {
 
 
 // Ruta para agregar una nueva línea
-// Ruta para agregar una nueva línea
 app.post('/agregar-linea', (req, res) => {
   const { numero, codbar, cantidad, codigo, codpro } = req.body;
 
-  // Validar los campos requeridos
   if (!numero || !codbar || typeof cantidad !== 'number' || !codigo || !codpro) {
     return res.status(400).json({ error: 'Datos incompletos o incorrectos.' });
   }
 
-  // Verificar si el codbar ya existe en aus_pepend
-  const checkCodbarQuery = 'SELECT * FROM aus_pepend WHERE codbar = ?';
-  db.query(checkCodbarQuery, [codbar], (checkErr, checkResults) => {
+  // Verificar si el artículo ya existe en alguna tabla
+  const checkQuery = `
+    SELECT codbar FROM aus_pepend WHERE codbar = ?
+    UNION ALL
+    SELECT codbar FROM aus_pepend2 WHERE codbar = ?
+  `;
+
+  db.query(checkQuery, [codbar, codbar], (checkErr, checkResults) => {
     if (checkErr) {
       console.error('Error verificando codbar existente:', checkErr);
-      return res.status(500).json({ error: 'Error en el servidor al verificar codbar existente.' });
+      return res.status(500).json({ error: 'Error al verificar existencia.' });
     }
 
     if (checkResults.length > 0) {
       return res.status(400).json({ error: 'El código de barras ya existe en el pedido.' });
     }
 
-    // Obtener el codpro del artículo desde aus_art para verificar
+    // Verificar proveedor del artículo
     const getCodProQuery = 'SELECT prove FROM aus_art WHERE id = ?';
-    db.query(getCodProQuery, [codigo], (getErr, getResults) => {
-      if (getErr) {
-        console.error('Error obteniendo codpro del artículo:', getErr);
-        return res.status(500).json({ error: 'Error en el servidor al obtener codpro del artículo.' });
+    db.query(getCodProQuery, [codigo], (artErr, artResults) => {
+      if (artErr) {
+        console.error('Error consultando artículo:', artErr);
+        return res.status(500).json({ error: 'Error al obtener el artículo.' });
       }
 
-      if (getResults.length === 0) {
-        return res.status(404).json({ error: 'Artículo no encontrado en aus_art.' });
+      if (artResults.length === 0) {
+        return res.status(404).json({ error: 'Artículo no encontrado.' });
       }
 
-      const articuloCodPro = getResults[0].prove;
-
-      if (articuloCodPro !== codpro) {
-        return res.status(400).json({ error: 'El artículo no pertenece al proveedor actual.' });
+      const artCodPro = artResults[0].prove;
+      if (artCodPro !== codpro) {
+        return res.status(400).json({ error: 'El artículo no pertenece al proveedor indicado.' });
       }
 
-      // Si pasa todas las validaciones, insertar la nueva línea
-      const insertQuery = `
-        INSERT INTO aus_pepend (numero, codbar, canped, codigo, codpro, ter)
-        VALUES (?, ?, ?, ?, ?, 0)
+      // Verificar si el pedido es viejo (existe en aus_pepend2 con pen = 1)
+      const checkPedidoViejo = `
+        SELECT numero FROM aus_pepend2 WHERE numero = ? AND pen = 1 LIMIT 1
       `;
 
-      db.query(insertQuery, [numero, codbar, cantidad, codigo, codpro], (insertErr, insertResults) => {
-        if (insertErr) {
-          console.error('Error agregando nueva línea:', insertErr);
-          return res.status(500).json({ error: 'Error al agregar la nueva línea.' });
+      db.query(checkPedidoViejo, [numero], (pedErr, pedResults) => {
+        if (pedErr) {
+          console.error('Error consultando pedido viejo:', pedErr);
+          return res.status(500).json({ error: 'Error consultando tipo de pedido.' });
         }
 
-        res.status(200).json({ message: 'Nueva línea agregada correctamente.' });
+        const tablaDestino = pedResults.length > 0 ? 'aus_pepend2' : 'aus_pepend';
+        const pen = pedResults.length > 0 ? 1 : 0;
+
+        const insertQuery = `
+          INSERT INTO ${tablaDestino} (numero, codbar, canped, codigo, codpro, cantrec, ter, pen)
+          VALUES (?, ?, ?, ?, ?, 0, 0, ?)
+        `;
+
+        db.query(insertQuery, [numero, codbar, cantidad, codigo, codpro, pen], (insErr) => {
+          if (insErr) {
+            console.error('Error insertando línea:', insErr);
+            return res.status(500).json({ error: 'Error al insertar la nueva línea.' });
+          }
+
+          return res.status(200).json({ message: 'Línea agregada correctamente.', tabla: tablaDestino });
+        });
       });
     });
   });
 });
+
+
 
 
 
