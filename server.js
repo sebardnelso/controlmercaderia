@@ -5,7 +5,7 @@ const express = require('express');
 const mysql = require('mysql');
 const cors = require('cors');
 const app = express();
-const port = process.env.PORT || 3001;
+const port = process.env.PORT || 3000;
 
 // Middlewares
 app.use(cors());
@@ -493,8 +493,9 @@ app.post('/agregar-linea', (req, res) => {
 
 
 // Inicia el servidor
-app.listen(3001, '0.0.0.0', () => {
-  console.log('Servidor corriendo en http://0.0.0.0:3001');
+// Iniciar el servidor
+app.listen(port, () => {
+  console.log(`Servidor escuchando en http://localhost:${port}`);
 });
 
 
