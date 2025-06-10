@@ -431,62 +431,96 @@ app.post('/agregar-linea', (req, res) => {
     return res.status(400).json({ error: 'Datos incompletos o incorrectos.' });
   }
 
-  const checkCodbarQuery = 'SELECT * FROM aus_pepend WHERE codbar = ?';
-  db.query(checkCodbarQuery, [codbar], (checkErr, checkResults) => {
-    if (checkErr) {
-      console.error('Error verificando codbar existente:', checkErr);
-      return res.status(500).json({ error: 'Error en el servidor al verificar codbar existente.' });
+  const getCodProQuery = 'SELECT prove FROM aus_art WHERE id = ?';
+  db.query(getCodProQuery, [codigo], (err, resultArt) => {
+    if (err) return res.status(500).json({ error: 'Error al verificar proveedor del artículo.' });
+
+    if (resultArt.length === 0) {
+      return res.status(404).json({ error: 'Artículo no encontrado.' });
     }
 
-    if (checkResults.length > 0) {
-      return res.status(400).json({ error: 'El código de barras ya existe en el pedido.' });
+    const proveedorArticulo = resultArt[0].prove;
+    if (proveedorArticulo !== codpro) {
+      return res.status(400).json({ error: 'El artículo no pertenece al proveedor actual.' });
     }
 
-    const getCodProQuery = 'SELECT prove FROM aus_art WHERE id = ?';
-    db.query(getCodProQuery, [codigo], (getErr, getResults) => {
-      if (getErr) {
-        console.error('Error obteniendo codpro del artículo:', getErr);
-        return res.status(500).json({ error: 'Error en el servidor al obtener codpro del artículo.' });
+    // Verificar existencia en ambas tablas
+    const queryCheckAmbas = `
+      SELECT 'pepend' AS origen FROM aus_pepend WHERE codbar = ?
+      UNION
+      SELECT 'pepend2' AS origen FROM aus_pepend2 WHERE codbar = ?
+    `;
+
+    db.query(queryCheckAmbas, [codbar, codbar], (errCheck, resultados) => {
+      if (errCheck) {
+        console.error('❌ Error consultando existencia en tablas:', errCheck);
+        return res.status(500).json({ error: 'Error en verificación de existencia.' });
       }
 
-      if (getResults.length === 0) {
-        return res.status(404).json({ error: 'Artículo no encontrado en aus_art.' });
-      }
+      const existeEnPepend = resultados.some(r => r.origen === 'pepend');
+      const existeEnPepend2 = resultados.some(r => r.origen === 'pepend2');
 
-      const articuloCodPro = getResults[0].prove;
-      if (articuloCodPro !== codpro) {
-        return res.status(400).json({ error: 'El artículo no pertenece al proveedor actual.' });
-      }
+      const insertOrUpdate = [];
 
-      // 🔍 Verificar si el pedido es viejo → existe en aus_pepend2
-      const checkPedidoViejoQuery = 'SELECT * FROM aus_pepend2 WHERE numero = ? LIMIT 1';
-      db.query(checkPedidoViejoQuery, [numero], (errCheckViejo, resultViejo) => {
-        if (errCheckViejo) {
-          console.error('Error verificando si el pedido es viejo:', errCheckViejo);
-          return res.status(500).json({ error: 'Error verificando tipo de pedido.' });
-        }
-
-        const tablaDestino = resultViejo.length > 0 ? 'aus_pepend2' : 'aus_pepend';
-        const insertQuery = `
-          INSERT INTO ${tablaDestino} (numero, codbar, canped, codigo, codpro, ter)
-          VALUES (?, ?, ?, ?, ?, 0)
-        `;
-
-        db.query(insertQuery, [numero, codbar, cantidad, codigo, codpro], (insertErr) => {
-          if (insertErr) {
-            console.error(`Error insertando en ${tablaDestino}:`, insertErr);
-            return res.status(500).json({ error: 'Error al agregar la nueva línea.' });
-          }
-
-          res.status(200).json({
-            message: `Nueva línea agregada correctamente en ${tablaDestino}.`,
-            destino: tablaDestino
+      // Insertar si NO existe
+      if (!existeEnPepend) {
+        insertOrUpdate.push(new Promise((resolve, reject) => {
+          const q = `
+            INSERT INTO aus_pepend (numero, codbar, canped, codigo, codpro, cantrec, ter, pen)
+            VALUES (?, ?, ?, ?, ?, 0, 0, 0)
+          `;
+          db.query(q, [numero, codbar, cantidad, codigo, codpro], (err) => {
+            if (err) return reject(err);
+            resolve('insertado en aus_pepend');
           });
+        }));
+      } else {
+        insertOrUpdate.push(new Promise((resolve, reject) => {
+          const q = `
+            UPDATE aus_pepend SET canped = ? WHERE codbar = ?
+          `;
+          db.query(q, [cantidad, codbar], (err) => {
+            if (err) return reject(err);
+            resolve('actualizado aus_pepend');
+          });
+        }));
+      }
+
+      if (!existeEnPepend2) {
+        insertOrUpdate.push(new Promise((resolve, reject) => {
+          const q = `
+            INSERT INTO aus_pepend2 (numero, codbar, canped, codigo, codpro, cantrec, ter, pen)
+            VALUES (?, ?, ?, ?, ?, 0, 0, 0)
+          `;
+          db.query(q, [numero, codbar, cantidad, codigo, codpro], (err) => {
+            if (err) return reject(err);
+            resolve('insertado en aus_pepend2');
+          });
+        }));
+      } else {
+        insertOrUpdate.push(new Promise((resolve, reject) => {
+          const q = `
+            UPDATE aus_pepend2 SET canped = ? WHERE codbar = ?
+          `;
+          db.query(q, [cantidad, codbar], (err) => {
+            if (err) return reject(err);
+            resolve('actualizado aus_pepend2');
+          });
+        }));
+      }
+
+      Promise.all(insertOrUpdate)
+        .then(msgs => {
+          res.status(200).json({ message: 'Línea procesada correctamente.', acciones: msgs });
+        })
+        .catch(err => {
+          console.error('❌ Error en inserciones/actualizaciones:', err);
+          res.status(500).json({ error: 'Error al insertar o actualizar línea.' });
         });
-      });
     });
   });
 });
+
 
 
 
@@ -497,5 +531,3 @@ app.post('/agregar-linea', (req, res) => {
 app.listen(port, () => {
   console.log(`Servidor escuchando en http://localhost:${port}`);
 });
-
-
