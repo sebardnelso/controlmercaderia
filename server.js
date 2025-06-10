@@ -226,7 +226,7 @@ app.get('/lineas/:numero', (req, res) => {
 app.post('/actualizar-cantrec', (req, res) => {
   const { codbar, cantrec, usuario, fecha, hora, numero } = req.body;
 
-  if (!codbar || typeof cantrec !== 'number' || !usuario || !fecha || !hora) {
+  if (!codbar || typeof cantrec !== 'number' || !usuario || !fecha || !hora || !numero) {
     return res.status(400).json({ error: 'Datos incompletos o incorrectos.' });
   }
 
@@ -243,7 +243,7 @@ app.post('/actualizar-cantrec', (req, res) => {
     }
 
     if (rows.length === 0) {
-      return res.status(404).json({ error: 'Línea no encontrada en ninguna tabla' });
+      return res.status(404).json({ error: 'Línea no encontrada con ese número de pedido' });
     }
 
     const row = rows[0];
@@ -253,34 +253,34 @@ app.post('/actualizar-cantrec', (req, res) => {
 
     const updates = [];
 
-    if (rows.some(r => r.origen === 'pepend')) {
+    if (row.origen === 'pepend') {
       updates.push(new Promise((resolve, reject) => {
         db.query(`
           UPDATE aus_pepend
           SET cantrec = ?, ter = ?, pen = ?, usuario = ?, fecha = ?, hora = ?
-          WHERE codbar = ?
-        `, [cantrec, ter, pen, usuario, fecha, hora, codbar], err => {
+          WHERE codbar = ? AND numero = ?
+        `, [cantrec, ter, pen, usuario, fecha, hora, codbar, numero], err => {
           if (err) return reject(err);
           resolve();
         });
       }));
     }
 
-    if (rows.some(r => r.origen === 'pepend2')) {
+    if (row.origen === 'pepend2') {
       updates.push(new Promise((resolve, reject) => {
         db.query(`
           UPDATE aus_pepend2
           SET cantrec = ?, ter = ?, pen = ?, usuario = ?, fecha = ?, hora = ?
-          WHERE codbar = ?
-        `, [cantrec, ter, pen, usuario, fecha, hora, codbar], err => {
+          WHERE codbar = ? AND numero = ?
+        `, [cantrec, ter, pen, usuario, fecha, hora, codbar, numero], err => {
           if (err) return reject(err);
           resolve();
         });
       }));
     }
 
-    if (rows.some(r => r.origen === 'pepend') && !rows.some(r => r.origen === 'pepend2')) {
-      const { numero, codigo, codpro } = row;
+    if (row.origen === 'pepend' && !rows.some(r => r.origen === 'pepend2')) {
+      const { codigo, codpro } = row;
       updates.push(new Promise((resolve, reject) => {
         db.query(`
           INSERT INTO aus_pepend2 (numero, codigo, codbar, canped, codpro, cantrec, ter, pen, usuario, fecha, hora)
@@ -292,8 +292,8 @@ app.post('/actualizar-cantrec', (req, res) => {
       }));
     }
 
-    if (rows.some(r => r.origen === 'pepend2') && !rows.some(r => r.origen === 'pepend')) {
-      const { numero, codigo, codpro } = row;
+    if (row.origen === 'pepend2' && !rows.some(r => r.origen === 'pepend')) {
+      const { codigo, codpro } = row;
       updates.push(new Promise((resolve, reject) => {
         db.query(`
           INSERT INTO aus_pepend (numero, codigo, codbar, canped, codpro, cantrec, ter, pen, usuario, fecha, hora)
@@ -313,6 +313,7 @@ app.post('/actualizar-cantrec', (req, res) => {
       });
   });
 });
+
 
 
 
@@ -431,8 +432,8 @@ app.post('/agregar-linea', (req, res) => {
     return res.status(400).json({ error: 'Datos incompletos o incorrectos.' });
   }
 
-  const checkCodbarQuery = 'SELECT * FROM aus_pepend WHERE codbar = ? AND numero = ?';
-  db.query(checkCodbarQuery, [codbar, numero], (checkErr, checkResults) => {
+  const checkCodbarQuery = 'SELECT * FROM aus_pepend WHERE codbar = ?';
+  db.query(checkCodbarQuery, [codbar], (checkErr, checkResults) => {
     if (checkErr) {
       console.error('Error verificando codbar existente:', checkErr);
       return res.status(500).json({ error: 'Error en el servidor al verificar codbar existente.' });
