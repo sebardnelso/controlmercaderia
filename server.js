@@ -224,19 +224,19 @@ app.get('/lineas/:numero', (req, res) => {
 
 // Ruta para actualizar cantrec
 app.post('/actualizar-cantrec', (req, res) => {
-  const { codbar, cantrec, usuario, fecha, hora } = req.body;
+  const { codbar, cantrec, usuario, fecha, hora, numero } = req.body;
 
   if (!codbar || typeof cantrec !== 'number' || !usuario || !fecha || !hora) {
     return res.status(400).json({ error: 'Datos incompletos o incorrectos.' });
   }
 
   const query = `
-    SELECT 'pepend' as origen, canped, numero, codigo, codpro FROM aus_pepend WHERE codbar = ?
+    SELECT 'pepend' as origen, canped, numero, codigo, codpro FROM aus_pepend WHERE codbar = ? AND numero = ?
     UNION ALL
-    SELECT 'pepend2' as origen, canped, numero, codigo, codpro FROM aus_pepend2 WHERE codbar = ?
+    SELECT 'pepend2' as origen, canped, numero, codigo, codpro FROM aus_pepend2 WHERE codbar = ? AND numero = ?
   `;
 
-  db.query(query, [codbar, codbar], (err, rows) => {
+  db.query(query, [codbar, numero, codbar, numero], (err, rows) => {
     if (err) {
       console.error('❌ Error consultando tablas:', err);
       return res.status(500).json({ error: 'Error interno' });
@@ -431,8 +431,8 @@ app.post('/agregar-linea', (req, res) => {
     return res.status(400).json({ error: 'Datos incompletos o incorrectos.' });
   }
 
-  const checkCodbarQuery = 'SELECT * FROM aus_pepend WHERE codbar = ?';
-  db.query(checkCodbarQuery, [codbar], (checkErr, checkResults) => {
+  const checkCodbarQuery = 'SELECT * FROM aus_pepend WHERE codbar = ? AND numero = ?';
+  db.query(checkCodbarQuery, [codbar, numero], (checkErr, checkResults) => {
     if (checkErr) {
       console.error('Error verificando codbar existente:', checkErr);
       return res.status(500).json({ error: 'Error en el servidor al verificar codbar existente.' });
