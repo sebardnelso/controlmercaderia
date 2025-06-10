@@ -224,26 +224,26 @@ app.get('/lineas/:numero', (req, res) => {
 
 // Ruta para actualizar cantrec
 app.post('/actualizar-cantrec', (req, res) => {
-  const { codbar, cantrec, usuario, fecha, hora, numero } = req.body;
+  const { codbar, cantrec, usuario, fecha, hora } = req.body;
 
-  if (!codbar || typeof cantrec !== 'number' || !usuario || !fecha || !hora || !numero) {
+  if (!codbar || typeof cantrec !== 'number' || !usuario || !fecha || !hora) {
     return res.status(400).json({ error: 'Datos incompletos o incorrectos.' });
   }
 
   const query = `
-    SELECT 'pepend' as origen, canped, numero, codigo, codpro FROM aus_pepend WHERE codbar = ? AND numero = ?
+    SELECT 'pepend' as origen, canped, numero, codigo, codpro FROM aus_pepend WHERE codbar = ?
     UNION ALL
-    SELECT 'pepend2' as origen, canped, numero, codigo, codpro FROM aus_pepend2 WHERE codbar = ? AND numero = ?
+    SELECT 'pepend2' as origen, canped, numero, codigo, codpro FROM aus_pepend2 WHERE codbar = ?
   `;
 
-  db.query(query, [codbar, numero, codbar, numero], (err, rows) => {
+  db.query(query, [codbar, codbar], (err, rows) => {
     if (err) {
       console.error('❌ Error consultando tablas:', err);
       return res.status(500).json({ error: 'Error interno' });
     }
 
     if (rows.length === 0) {
-      return res.status(404).json({ error: 'Línea no encontrada con ese número de pedido' });
+      return res.status(404).json({ error: 'Línea no encontrada en ninguna tabla' });
     }
 
     const row = rows[0];
@@ -253,34 +253,34 @@ app.post('/actualizar-cantrec', (req, res) => {
 
     const updates = [];
 
-    if (row.origen === 'pepend') {
+    if (rows.some(r => r.origen === 'pepend')) {
       updates.push(new Promise((resolve, reject) => {
         db.query(`
           UPDATE aus_pepend
           SET cantrec = ?, ter = ?, pen = ?, usuario = ?, fecha = ?, hora = ?
-          WHERE codbar = ? AND numero = ?
-        `, [cantrec, ter, pen, usuario, fecha, hora, codbar, numero], err => {
+          WHERE codbar = ?
+        `, [cantrec, ter, pen, usuario, fecha, hora, codbar], err => {
           if (err) return reject(err);
           resolve();
         });
       }));
     }
 
-    if (row.origen === 'pepend2') {
+    if (rows.some(r => r.origen === 'pepend2')) {
       updates.push(new Promise((resolve, reject) => {
         db.query(`
           UPDATE aus_pepend2
           SET cantrec = ?, ter = ?, pen = ?, usuario = ?, fecha = ?, hora = ?
-          WHERE codbar = ? AND numero = ?
-        `, [cantrec, ter, pen, usuario, fecha, hora, codbar, numero], err => {
+          WHERE codbar = ?
+        `, [cantrec, ter, pen, usuario, fecha, hora, codbar], err => {
           if (err) return reject(err);
           resolve();
         });
       }));
     }
 
-    if (row.origen === 'pepend' && !rows.some(r => r.origen === 'pepend2')) {
-      const { codigo, codpro } = row;
+    if (rows.some(r => r.origen === 'pepend') && !rows.some(r => r.origen === 'pepend2')) {
+      const { numero, codigo, codpro } = row;
       updates.push(new Promise((resolve, reject) => {
         db.query(`
           INSERT INTO aus_pepend2 (numero, codigo, codbar, canped, codpro, cantrec, ter, pen, usuario, fecha, hora)
@@ -292,8 +292,8 @@ app.post('/actualizar-cantrec', (req, res) => {
       }));
     }
 
-    if (row.origen === 'pepend2' && !rows.some(r => r.origen === 'pepend')) {
-      const { codigo, codpro } = row;
+    if (rows.some(r => r.origen === 'pepend2') && !rows.some(r => r.origen === 'pepend')) {
+      const { numero, codigo, codpro } = row;
       updates.push(new Promise((resolve, reject) => {
         db.query(`
           INSERT INTO aus_pepend (numero, codigo, codbar, canped, codpro, cantrec, ter, pen, usuario, fecha, hora)
@@ -313,7 +313,6 @@ app.post('/actualizar-cantrec', (req, res) => {
       });
   });
 });
-
 
 
 
@@ -432,32 +431,26 @@ app.post('/agregar-linea', (req, res) => {
     return res.status(400).json({ error: 'Datos incompletos o incorrectos.' });
   }
 
-  // Validar que el codbar NO esté duplicado en el mismo número de pedido
-  const checkCodbarQuery = `
-    SELECT * FROM aus_pepend WHERE codbar = ? AND numero = ?
-    UNION ALL
-    SELECT * FROM aus_pepend2 WHERE codbar = ? AND numero = ?
-  `;
-  db.query(checkCodbarQuery, [codbar, numero, codbar, numero], (checkErr, checkResults) => {
+  const checkCodbarQuery = 'SELECT * FROM aus_pepend WHERE codbar = ?';
+  db.query(checkCodbarQuery, [codbar], (checkErr, checkResults) => {
     if (checkErr) {
-      console.error('Error verificando existencia de codbar:', checkErr);
-      return res.status(500).json({ error: 'Error en el servidor al verificar codbar.' });
+      console.error('Error verificando codbar existente:', checkErr);
+      return res.status(500).json({ error: 'Error en el servidor al verificar codbar existente.' });
     }
 
     if (checkResults.length > 0) {
-      return res.status(400).json({ error: 'Este código de barras ya existe en el pedido.' });
+      return res.status(400).json({ error: 'El código de barras ya existe en el pedido.' });
     }
 
-    // Obtener proveedor del artículo
     const getCodProQuery = 'SELECT prove FROM aus_art WHERE id = ?';
     db.query(getCodProQuery, [codigo], (getErr, getResults) => {
       if (getErr) {
         console.error('Error obteniendo codpro del artículo:', getErr);
-        return res.status(500).json({ error: 'Error al obtener proveedor del artículo.' });
+        return res.status(500).json({ error: 'Error en el servidor al obtener codpro del artículo.' });
       }
 
       if (getResults.length === 0) {
-        return res.status(404).json({ error: 'Artículo no encontrado.' });
+        return res.status(404).json({ error: 'Artículo no encontrado en aus_art.' });
       }
 
       const articuloCodPro = getResults[0].prove;
@@ -465,12 +458,12 @@ app.post('/agregar-linea', (req, res) => {
         return res.status(400).json({ error: 'El artículo no pertenece al proveedor actual.' });
       }
 
-      // Detectar si el número pertenece a un pedido viejo
-      const checkPedidoViejoQuery = 'SELECT 1 FROM aus_pepend2 WHERE numero = ? LIMIT 1';
+      // 🔍 Verificar si el pedido es viejo → existe en aus_pepend2
+      const checkPedidoViejoQuery = 'SELECT * FROM aus_pepend2 WHERE numero = ? LIMIT 1';
       db.query(checkPedidoViejoQuery, [numero], (errCheckViejo, resultViejo) => {
         if (errCheckViejo) {
-          console.error('Error verificando tipo de pedido:', errCheckViejo);
-          return res.status(500).json({ error: 'Error verificando pedido.' });
+          console.error('Error verificando si el pedido es viejo:', errCheckViejo);
+          return res.status(500).json({ error: 'Error verificando tipo de pedido.' });
         }
 
         const tablaDestino = resultViejo.length > 0 ? 'aus_pepend2' : 'aus_pepend';
@@ -482,11 +475,11 @@ app.post('/agregar-linea', (req, res) => {
         db.query(insertQuery, [numero, codbar, cantidad, codigo, codpro], (insertErr) => {
           if (insertErr) {
             console.error(`Error insertando en ${tablaDestino}:`, insertErr);
-            return res.status(500).json({ error: 'Error al insertar línea.' });
+            return res.status(500).json({ error: 'Error al agregar la nueva línea.' });
           }
 
           res.status(200).json({
-            message: `Línea agregada correctamente en ${tablaDestino}.`,
+            message: `Nueva línea agregada correctamente en ${tablaDestino}.`,
             destino: tablaDestino
           });
         });
@@ -494,7 +487,6 @@ app.post('/agregar-linea', (req, res) => {
     });
   });
 });
-
 
 
 
